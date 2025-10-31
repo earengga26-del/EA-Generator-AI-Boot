@@ -1,13 +1,16 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect, useMemo, useCallback } from 'react';
 
-// Konteks tidak lagi memerlukan `setApiKey`.
+// Konteks dengan setApiKey untuk user input
 interface ApiKeyContextType {
   apiKey: string;
+  setApiKey: (key: string) => void;
   isApiKeySet: boolean;
   isInitializing: boolean;
 }
 
 const ApiKeyContext = createContext<ApiKeyContextType | undefined>(undefined);
+
+const LOCALSTORAGE_KEY = 'gemini_api_key';
 
 export const ApiKeyProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [apiKey, setApiKeyState] = useState<string>('');
@@ -19,20 +22,37 @@ export const ApiKeyProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return key.toUpperCase().includes('PLACEHOLDER');
   };
 
-  // Logika inisialisasi yang diperbarui untuk menangani kedua lingkungan (AI Studio & Vercel)
+  // Fungsi untuk set API key dengan localStorage support
+  const setApiKey = useCallback((key: string) => {
+    setApiKeyState(key);
+    if (key && !isPlaceholderKey(key)) {
+      localStorage.setItem(LOCALSTORAGE_KEY, key);
+    } else {
+      localStorage.removeItem(LOCALSTORAGE_KEY);
+    }
+  }, []);
+
+  // Logika inisialisasi yang diperbarui untuk menangani localStorage, env, dan backend
   const initializeApiKey = useCallback(async () => {
     setIsInitializing(true);
 
-    // Prioritas #1: Cek environment variable di frontend (untuk AI Studio)
-    // `process.env.API_KEY` disediakan oleh lingkungan build/dev seperti AI Studio
+    // Prioritas #1: Cek localStorage (user input)
+    const storedKey = localStorage.getItem(LOCALSTORAGE_KEY);
+    if (storedKey && !isPlaceholderKey(storedKey)) {
+      setApiKeyState(storedKey);
+      setIsInitializing(false);
+      return; // Kunci ditemukan di localStorage
+    }
+
+    // Prioritas #2: Cek environment variable di frontend (untuk AI Studio)
     const envApiKey = process.env.API_KEY;
     if (envApiKey && !isPlaceholderKey(envApiKey)) {
         setApiKeyState(envApiKey);
         setIsInitializing(false);
-        return; // Kunci ditemukan, tidak perlu mengambil dari backend
+        return; // Kunci ditemukan di env
     }
 
-    // Prioritas #2: Jika tidak ada di env frontend, ambil dari backend (untuk Vercel)
+    // Prioritas #3: Jika tidak ada di localStorage/env, ambil dari backend (untuk Vercel)
     try {
       const response = await fetch('/api/get-api-key');
       if (response.ok) {
@@ -57,9 +77,9 @@ export const ApiKeyProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const isApiKeySet = useMemo(() => !!apiKey && !isPlaceholderKey(apiKey), [apiKey]);
 
-  // Menyediakan nilai konteks.
+  // Menyediakan nilai konteks dengan setApiKey
   return (
-    <ApiKeyContext.Provider value={{ apiKey, isApiKeySet, isInitializing }}>
+    <ApiKeyContext.Provider value={{ apiKey, setApiKey, isApiKeySet, isInitializing }}>
       {children}
     </ApiKeyContext.Provider>
   );
